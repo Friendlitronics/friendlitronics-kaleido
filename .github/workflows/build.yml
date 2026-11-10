@@ -1,0 +1,112 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Attaching a zip to a release needs write access to contents; org defaults are
+# often read-only, which fails late, at the publish step.
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS (universal)
+    runs-on: macos-14
+
+    # Signing is optional: without these secrets the job still builds and
+    # uploads an unsigned zip, so forks and pull requests work unchanged.
+    env:
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      SIGN_ID: ${{ secrets.SIGN_ID }}
+      TEAM_ID: ${{ secrets.TEAM_ID }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APP_PASSWORD: ${{ secrets.APP_PASSWORD }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # JUCE is fetched by CMake; caching it keeps builds to a couple of minutes.
+      - name: Cache fetched JUCE
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: juce-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'patches/*.patch') }}
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release -j 3
+
+      - name: Validate the Audio Unit
+        # auval needs the component installed; CI builds skip the install step,
+        # so put it where auval will find it before asking.
+        run: |
+          mkdir -p ~/Library/Audio/Plug-Ins/Components
+          cp -R "build/FriendlitronicsKaleido_artefacts/Release/AU/Friendlitronics Kaleido.component" \
+                ~/Library/Audio/Plug-Ins/Components/
+          killall -9 AudioComponentRegistrar 2>/dev/null || true
+          auval -v aufx Kald Frnd
+
+      - name: Import signing certificate
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" \
+                          -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k actions \
+                          build.keychain > /dev/null
+          rm /tmp/cert.p12
+
+      - name: Sign, notarise and package
+        if: env.MACOS_CERT_P12 != ''
+        run: |
+          ./scripts/sign-and-notarise.sh
+          VERSION=$(grep -m1 'project(FriendlitronicsKaleido VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          echo "ZIP=dist/FriendlitronicsKaleido-${VERSION}-macOS.zip" >> "$GITHUB_ENV"
+
+      - name: Package (unsigned)
+        if: env.MACOS_CERT_P12 == ''
+        run: |
+          VERSION=$(grep -m1 'project(FriendlitronicsKaleido VERSION' CMakeLists.txt | sed -E 's/.*VERSION ([0-9.]+).*/\1/')
+          DIR="FriendlitronicsKaleido-${VERSION}-macOS"
+          mkdir -p "dist/$DIR"
+          ditto "build/FriendlitronicsKaleido_artefacts/Release/VST3/Friendlitronics Kaleido.vst3" "dist/$DIR/Friendlitronics Kaleido.vst3"
+          ditto "build/FriendlitronicsKaleido_artefacts/Release/AU/Friendlitronics Kaleido.component" "dist/$DIR/Friendlitronics Kaleido.component"
+          ditto "build/FriendlitronicsKaleido_artefacts/Release/Standalone/Friendlitronics Kaleido.app" "dist/$DIR/Friendlitronics Kaleido.app"
+          cp docs/INSTALL-macOS.txt "dist/$DIR/How to install.txt"
+          ditto -c -k --sequesterRsrc --keepParent "dist/$DIR" "dist/$DIR.zip"
+          echo "ZIP=dist/$DIR.zip" >> "$GITHUB_ENV"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FriendlitronicsKaleido-macOS
+          path: ${{ env.ZIP }}
+
+      # Tagging v1.2.3 publishes a release with the zip attached — but only
+      # when the build was signed. An unsigned zip must never overwrite a
+      # notarised asset on an existing release, which is exactly what would
+      # happen if the secrets were missing or expired.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v') && env.MACOS_CERT_P12 != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.ZIP }}
+          body: |
+            - **Friendlitronics Kaleido**: drop the `.vst3` into
+              `~/Library/Audio/Plug-Ins/VST3` (and/or the `.component` into
+              `Components`), then rescan in your host. The `.app` is the same
+              effect as a standalone: drag it into `/Applications`.
+
+            Signed and notarised, so there is nothing to approve. The app asks
+            for microphone permission the first time it opens an input.

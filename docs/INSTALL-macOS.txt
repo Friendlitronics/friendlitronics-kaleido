@@ -1,0 +1,49 @@
+FRIENDLITRONICS KALEIDO: install (macOS 11 or newer, Apple Silicon + Intel)
+==========================================================================
+
+Three copies of the same effect are in this folder. Most people want the VST3:
+
+  Friendlitronics Kaleido.vst3        VST3: Ableton, Reaper, Bitwig, Cubase, ...
+  Friendlitronics Kaleido.component   Audio Unit: Logic, GarageBand
+  Friendlitronics Kaleido.app         Standalone: plug in and play, no DAW
+
+INSTALL
+-------
+1. In Finder press Cmd+Shift+G and paste:
+
+       ~/Library/Audio/Plug-Ins/VST3
+
+   Drag "Friendlitronics Kaleido.vst3" into that folder.
+   (For the Audio Unit, use ~/Library/Audio/Plug-Ins/Components instead.
+   The .app goes in /Applications.)
+
+2. Restart your DAW. In Ableton: Settings > Plug-Ins > Rescan.
+
+3. Find it under Plug-Ins > Friendlitronics > Friendlitronics Kaleido.
+
+This build is signed and notarised by Apple, so there are no security warnings
+and nothing to approve. The standalone app asks for microphone permission the
+first time it opens an input; say yes or it hears silence.
+
+FIRST THINGS TO TRY
+-------------------
+- Set INPUT to Instrument for a guitar or bass plugged straight in, or Line
+  for synths, vocals and buses. Then use TRIM so the IN meter peaks around
+  the middle.
+- The strip of four tiles is the signal chain. Drag tiles to reorder it;
+  click a tile to switch that slot on or off.
+- Turn up DRIFT slowly. Past about a third it starts to misbehave on purpose.
+
+IF SOMETHING GOES WRONG
+-----------------------
+Plugin doesn't appear: quit the DAW completely, reopen, rescan. In Ableton
+check that "Use VST3 Plug-in System Folders" is switched on.
+
+Audio Unit doesn't appear in Logic: run this in Terminal, then reopen Logic:
+
+    killall -9 AudioComponentRegistrar
+
+Standalone hears nothing: System Settings > Privacy & Security > Microphone,
+and switch Friendlitronics Kaleido on. Also check Options > Audio/MIDI
+Settings in the app, and un-mute the input there if it says it is muted to
+avoid feedback (use headphones).
